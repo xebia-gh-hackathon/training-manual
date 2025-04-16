@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+#
+# Create initial repo
+
+# shellcheck disable=SC1091
+source "$HOME/.trainingmanualrc"
+
+# shellcheck source=script/shared_functions
+source ./shared_functions
+
+template_name="caption-this"
+org_url="https://$ROOT_URL/$CLASS_ORG"
+org_repos_endpoint="https://$INSTANCE_URL/repos/$CLASS_ORG"
+template_url="https://github.com/githubtraining/$template_name"
+template_url_ghes="https://$ROOT_URL/$CLASS_ORG/$template_name"
+
+get_initial_repo_name() {
+  # Get the repo name
+  read -r -p "What would you like to name the repo? " initial_repo_name
+
+  repo_url="$org_url/$initial_repo_name"
+
+  echo "Checking if that repo name is available... [$repo_url]"
+  if repo_is_reachable "$repo_url"; then
+    echo "A repo with that name already exists. Please choose another name."
+    get_initial_repo_name
+  else
+    echo "Repo name is available!"
+  fi
+}
+
+create_initial_repo() {
+  local repo_name="$initial_repo_name"
+
+  # Set the homepage based on the root URL
+  case "$ROOT_URL" in
+  github.com) : "https://$CLASS_ORG.github.io/$initial_repo_name/" ;;
+  *) : "https://$ROOT_URL/pages/$CLASS_ORG/$initial_repo_name/" ;;
+  esac
+  local homepage="$_"
+
+  # Set the template URL based on the root URL
+  case "$ROOT_URL" in
+  github.com) : "$template_url" ;;
+  *) : "$template_url_ghes" ;;
+  esac
+  local template_repo_url="$_"
+
+  # Create a new empty repo
+  create_repo \
+    --name "$repo_name" \
+    --description "Let's learn about Git and GitHub" \
+    --homepage "$homepage" \
+    --private false \
+    --has_wiki false
+
+  # Add the token owner as a collaborator
+  add_repo_collaborator --repo "$repo_name" --user "$TOKEN_OWNER" --permission "admin"
+
+  # Find the default branch and store its value
+  default_branch=$(http --auth "$TOKEN_OWNER:$TEACHER_PAT" \
+    --json GET "https://$INSTANCE_URL/repos/$CLASS_ORG/$repo_name" |
+    jq '.default_branch' | sed -e 's/^"//' -e 's/"$//')
+
+  # Create and push README.md
+  create_and_push_readme "$repo_name"
+}
+
+create_and_push_readme() {
+  local repo_name=$1
+
+  echo "Creating README.md for $repo_name..."
+  
+  if [[ -f hackathon.md ]]; then
+    echo "Using content from hackathon.md for README.md..."
+    cp hackathon.md README.md
+    sed -i "s|<repo>|$repo_name|g" README.md
+  else
+    echo "# $repo_name" > README.md
+    echo "This repository is for learning Git and GitHub." >> README.md
+  fi
+
+  git init
+  git remote add origin "https://$TOKEN_OWNER:$TEACHER_PAT@$ROOT_URL/$CLASS_ORG/$repo_name.git"
+  git add README.md
+  git commit -m "Add README.md"
+  git branch -M main
+  git push -u origin main
+  rm -rf .git README.md
+}
+
+create_initial_issue() {
+  # Navigate to the practice-repos directory
+  cd "$(dirname "$0")/../practice-repos" || exit
+
+  # Set $practice_repos_dir to the "physical" path of the working directory
+  practice_repos_dir=$(pwd -P)
+
+  # Switch back to the previous directory
+  cd - >/dev/null || exit
+
+  # Create the issue
+  create_issue --repo "$initial_repo_name" --title "Add collaborators to this repo" \
+    --body "$(<"$practice_repos_dir/caption-this/issue_1.md")"
+}
+
+
+# Get the repo name
+get_initial_repo_name
+
+# Create the initial repo
+create_initial_repo
+
+# Create the initial issue
+create_initial_issue
+
+
+print_done "Here's a link to the repo: $repo_url"
+print_success "Good luck with class!"
